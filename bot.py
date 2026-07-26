@@ -97,10 +97,13 @@ TERMS_TEXT = os.environ.get(
 # admin Approve/Reject flow so nothing is ever silently stuck.
 BHARATPE_TOKEN = os.environ.get("BHARATPE_TOKEN", "")
 BHARATPE_API_URL = "https://bharatpe-payment-checker.vercel.app/check"
-# Rupees of slack allowed between the order total and what BharatPe reports,
-# to absorb harmless UPI rounding — never used to approve a materially
-# different amount.
-BHARATPE_AMOUNT_TOLERANCE = float(os.environ.get("BHARATPE_AMOUNT_TOLERANCE", "1.0"))
+# Rupees of slack allowed between the order total and what BharatPe reports.
+# UPI amounts should match exactly — there's no legitimate "rounding" to
+# absorb — so this defaults to 0 (exact match, to the paisa). Only raise it
+# if you've actually observed BharatPe reporting fractional-paisa float
+# noise; never raise it enough to cover a genuinely different amount, since
+# that's exactly what lets someone pay ₹1 and claim a ₹2+ coupon.
+BHARATPE_AMOUNT_TOLERANCE = float(os.environ.get("BHARATPE_AMOUNT_TOLERANCE", "0.01"))
 # How many UTR guesses a buyer gets before we stop hitting the API and just
 # hand it to an admin.
 MAX_UTR_ATTEMPTS = int(os.environ.get("MAX_UTR_ATTEMPTS", "3"))
