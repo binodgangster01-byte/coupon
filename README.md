@@ -29,7 +29,10 @@ client automatically. Optionally set PREMIUM_EMOJI_IDS (JSON, e.g.
 icon on specific buttons — this only renders for chats where the bot
 owner's Telegram account has an active Premium subscription; everyone
 else just sees the button without an icon, so it's safe to leave set
-either way.
+either way. To get an id: as an admin, DM the bot /emojiid followed by
+the premium emoji (picked from your Premium emoji panel), and it
+replies with the id to paste into PREMIUM_EMOJI_IDS. Button keys used
+in code: buy, orders, recover, support, product, qty, agree, paid.
 My Orders — buyer sees their order history, quantity, and status.
 Recover Vouchers — buyer re-fetches their code(s) by Order ID.
 Support — buyer picks an order and messages you; every admin gets it
