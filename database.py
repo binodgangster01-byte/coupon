@@ -71,7 +71,8 @@ def init_db():
     db.voucher_codes.create_index([("product_id", ASCENDING), ("used", ASCENDING)])
     db.orders.create_index([("order_id", ASCENDING)], unique=True)
     db.orders.create_index([("user_id", ASCENDING)])
-    db.counters.create_index([("_id", ASCENDING)], unique=True)
+    # No index needed on counters._id — MongoDB's default _id index is
+    # already unique, and it rejects a custom "unique" option on it.
 
 
 def _next_id(db, counter_name: str) -> int:
