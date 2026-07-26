@@ -5,6 +5,10 @@ A coupon/voucher-selling Telegram bot, modeled on the "Buy Vouchers / My
 Orders / Recover Vouchers / Support" flow, including the quantity picker,
 Terms & Conditions step, and UPI QR code payment page.
 
+All admin actions — payment approvals, product/stock management, and
+support replies — happen in a private DM with the bot. No admin group is
+needed.
+
 Full buy flow
 1. Buyer taps "Buy Vouchers" -> sees your in-stock products.
 2. Buyer picks one -> bot shows stock/price and a quantity picker
@@ -14,26 +18,31 @@ Full buy flow
    exact amount, and shows the payment page (Order ID, Service, Qty, Amount,
    QR, "valid for 10 minutes", I've Paid button). The order auto-expires if
    unpaid after 10 minutes.
-5. Buyer taps "I've Paid" -> forwarded to your admin group for verification
-   (prevents fake-payment fraud — no auto-trust of a button tap).
-6. You (admin) tap Approve in the admin group -> the bot instantly pulls the
-   right number of codes from stock and DMs them to the buyer. Tap Reject ->
+5. Buyer taps "I've Paid" -> every admin in ADMIN_USER_IDS gets a DM with
+   Approve/Reject buttons (prevents fake-payment fraud — no auto-trust of a
+   button tap).
+6. An admin taps Approve in their DM -> the bot instantly pulls the right
+   number of codes from stock and DMs them to the buyer. Tap Reject ->
    buyer is notified and no stock is touched.
 7. Buyer can review "My Orders" any time, or use "Recover Vouchers" with an
    Order ID to fetch codes they lost.
 8. "Support" lets a buyer pick one of their orders and message you directly;
-   you reply with /reply <user_id> <message> in the admin chat.
+   every admin gets it as a DM, and any admin can reply with
+   /reply <user_id> <message> from their own DM with the bot.
 
 Setup
 -----
 1. pip install -r requirements.txt
 2. Create a bot with @BotFather, copy the token.
-3. Create a private admin group, add the bot to it, get the group's chat id
-   (e.g. via @userinfobot or by checking bot logs after /start in the group).
-4. Set the environment variables below (or edit the constants directly).
-5. python bot.py
+3. Every admin must open a DM with the bot and send /start at least once —
+   Telegram only allows a bot to message a user after that user has messaged
+   it first. Skipping this means that admin silently won't get notified.
+4. Get each admin's numeric Telegram user id (e.g. via @userinfobot in a DM)
+   and list them all in ADMIN_USER_IDS, comma-separated.
+5. Set the environment variables below (or edit the constants directly).
+6. python bot.py
 
-Admin commands (in the admin chat or your DM with the bot)
+Admin commands (send these directly to the bot in your own DM)
   /addproduct <price> <name>              e.g. /addproduct 54.99 Blinkit icecream 100 per 100 off
   /addcodes <product_id>                  then send codes, one per line, in your next message
   /products                               list products + ids + live stock
@@ -69,7 +78,6 @@ import database as db
 
 # --------------------------------------------------------------- settings
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_BOT_TOKEN_HERE")
-ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))  # your admin group/user id
 ADMIN_USER_IDS = {
     int(x) for x in os.environ.get("ADMIN_USER_IDS", "").split(",") if x.strip()
 }
@@ -132,7 +140,29 @@ QTY_PRESETS = [1, 5, 10]
 
 
 def is_admin(user_id: int) -> bool:
-    return user_id in ADMIN_USER_IDS or user_id == ADMIN_CHAT_ID
+    return user_id in ADMIN_USER_IDS
+
+
+async def notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+    """
+    DM every admin in ADMIN_USER_IDS directly — no group chat needed.
+    Note: Telegram only lets a bot message a user after that user has sent
+    it at least one message (e.g. /start). If an admin hasn't messaged the
+    bot yet, the send fails for them specifically and we just log it and
+    keep trying the rest.
+    """
+    if not ADMIN_USER_IDS:
+        log.error("No ADMIN_USER_IDS configured — nobody can be notified of orders/support.")
+        return
+    for admin_id in ADMIN_USER_IDS:
+        try:
+            await context.bot.send_message(
+                admin_id, text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
+            )
+        except Exception as e:
+            log.warning(
+                f"Could not DM admin {admin_id} — have they sent /start to the bot yet? ({e})"
+            )
 
 
 def order_prefix_for(user) -> str:
@@ -153,6 +183,30 @@ def md(text) -> str:
     return escape_markdown(str(text), version=1)
 
 
+async def notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+    """
+    Send a message to every admin in ADMIN_USER_IDS individually (DM, not a
+    group). Each admin gets their own copy with their own Approve/Reject
+    buttons — whoever acts on it first wins, the others' copies will just
+    say "already handled" if tapped afterward.
+
+    Note: Telegram only lets a bot DM someone who has already started a
+    conversation with it (sent /start at least once). If an admin hasn't
+    done that yet, sending to them fails — logged clearly below rather
+    than silently, so it's visible in Render's Logs tab.
+    """
+    if not ADMIN_USER_IDS:
+        log.warning("No ADMIN_USER_IDS configured — nobody will be notified.")
+        return
+    for admin_id in ADMIN_USER_IDS:
+        try:
+            await context.bot.send_message(
+                admin_id, text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup
+            )
+        except Exception as e:
+            log.error(f"Could not DM admin {admin_id} — have they sent /start to the bot yet? ({e})")
+
+
 # ------------------------------------------------------------------ /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -161,6 +215,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "manually and codes are delivered the moment your order is approved.\n\n"
         "Choose an option below to get started."
     )
+    if is_admin(update.effective_user.id):
+        text += (
+            "\n\n🛠 *You're an admin.* This DM is now unlocked to receive "
+            "order/support notifications. Commands: /addproduct, /addcodes, "
+            "/products, /deactivate, /reply."
+        )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=MAIN_MENU)
 
 
@@ -380,27 +440,24 @@ async def buyer_confirmed_payment(update: Update, context: ContextTypes.DEFAULT_
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    if ADMIN_CHAT_ID:
-        admin_text = (
-            "💰 *Payment claim*\n"
-            f"Order: `{order['order_id']}`\n"
-            f"Item: {md(order['product_name'])}\n"
-            f"Qty: {order['quantity']}\n"
-            f"Amount: ₹{order['price']:.2f}\n"
-            f"Buyer: {md(order['username'])} (id `{order['user_id']}`)\n\n"
-            "Verify the payment in your bank/UPI app, then tap Approve or Reject."
-        )
-        admin_buttons = InlineKeyboardMarkup(
+    admin_text = (
+        "💰 *Payment claim*\n"
+        f"Order: `{order['order_id']}`\n"
+        f"Item: {md(order['product_name'])}\n"
+        f"Qty: {order['quantity']}\n"
+        f"Amount: ₹{order['price']:.2f}\n"
+        f"Buyer: {md(order['username'])} (id `{order['user_id']}`)\n\n"
+        "Verify the payment in your bank/UPI app, then tap Approve or Reject."
+    )
+    admin_buttons = InlineKeyboardMarkup(
+        [
             [
-                [
-                    InlineKeyboardButton("✅ Approve", callback_data=f"approve:{order_id}"),
-                    InlineKeyboardButton("❌ Reject", callback_data=f"reject:{order_id}"),
-                ]
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve:{order_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reject:{order_id}"),
             ]
-        )
-        await context.bot.send_message(
-            ADMIN_CHAT_ID, admin_text, parse_mode=ParseMode.MARKDOWN, reply_markup=admin_buttons
-        )
+        ]
+    )
+    await notify_admins(context, admin_text, admin_buttons)
 
 
 # ------------------------------------------------------------ admin decision
@@ -525,13 +582,11 @@ async def support_order_picked(update: Update, context: ContextTypes.DEFAULT_TYP
 async def support_relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = context.user_data.get("support_order_id", "unknown")
     user = update.effective_user
-    if ADMIN_CHAT_ID:
-        await context.bot.send_message(
-            ADMIN_CHAT_ID,
-            f"🆘 *Support message*\nOrder: `{order_id}`\nFrom: {md(user.username or user.full_name)} (id `{user.id}`)\n\n"
-            f"{md(update.message.text)}",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    admin_text = (
+        f"🆘 *Support message*\nOrder: `{order_id}`\nFrom: {md(user.username or user.full_name)} (id `{user.id}`)\n\n"
+        f"{md(update.message.text)}"
+    )
+    await notify_admins(context, admin_text)
     await update.message.reply_text("Sent to our team — we'll reply here soon.", reply_markup=MAIN_MENU)
     return ConversationHandler.END
 
