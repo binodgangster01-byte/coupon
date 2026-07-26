@@ -19,18 +19,29 @@ gets a DM with Approve/Reject buttons. A UTR can never be reused across
 two orders.
 Instant delivery — on Approve, the bot atomically pulls the right
 number of unused codes from your stock and DMs them to the buyer.
+Colorful buttons — every button (menu, product list, quantity picker,
+Approve/Reject, etc.) uses Telegram's built-in button colors: green for
+"go" actions and in-stock products, blue for neutral choices, red for
+cancel/reject/sold-out. This uses each Telegram client's native button
+styling (Bot API 9.4+), not custom images, so it looks right in every
+client automatically. Optionally set PREMIUM_EMOJI_IDS (JSON, e.g.
+{"buy": "5368324170671202286"}) to show your own premium emoji as an
+icon on specific buttons — this only renders for chats where the bot
+owner's Telegram account has an active Premium subscription; everyone
+else just sees the button without an icon, so it's safe to leave set
+either way.
 My Orders — buyer sees their order history, quantity, and status.
 Recover Vouchers — buyer re-fetches their code(s) by Order ID.
 Support — buyer picks an order and messages you; every admin gets it
-as a DM, and any admin can reply with /reply <user_id> <message> from
+as a DM, and any admin can reply with /reply <user_id>  from
 their own DM with the bot.
 All admin actions happen in a private DM with the bot — no admin group
 needed.
 Order IDs are formatted like SUMIT-20260725-0E629B — prefixed with the
 buyer's Telegram first name, then the date, then a random suffix.
-1. Install
+Install
 Bash
-2. Create your bot
+Create your bot
 Talk to @BotFather on Telegram → /newbot → copy the token.
 Every admin needs to open a DM with the new bot and send /start at
 least once. Telegram only lets a bot message someone after that person
@@ -46,22 +57,22 @@ Database Access → add a database user with a username/password.
 Network Access → add 0.0.0.0/0 (allow from anywhere) unless you
 have a fixed server IP — Render's free tier doesn't give you one.
 Connect → Drivers → copy the connection string. It looks like:
-mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/
+mongodb+srv://:@cluster0.xxxxx.mongodb.net/
 You'll set this as MONGO_URI in the next step.
 (Running MongoDB locally instead is also fine for testing —
 MONGO_URI=mongodb://localhost:27017 is the default if you don't set one.)
-3. Configure
+Configure
 Set environment variables (or edit the constants at the top of bot.py):
 Bash
-4. Run
+Run
 Bash
-5. Add products & stock (as admin)
+Add products & stock (as admin)
 Send these directly to the bot in your own DM (each admin has their own
 access, once they've sent /start):
 Code
 Each pasted code becomes exactly one unit of stock. When a buyer's payment
 is approved, one code is claimed and can never be handed out twice.
-6. Deploy on Render (free tier)
+Deploy on Render (free tier)
 Render's free tier only offers Web Services (things that answer HTTP
 requests) for free — Background Workers cost $7/mo minimum. This bot
 uses Telegram long-polling, not HTTP, so bot.py includes a tiny built-in
@@ -103,8 +114,10 @@ it's unset, the API call fails, or the UTR/amount doesn't check out, the
 bot always falls back to the manual admin Approve/Reject buttons so a
 real payment is never lost. MAX_UTR_ATTEMPTS (default 3) caps how many
 UTR guesses a buyer gets before falling back, and
-BHARATPE_AMOUNT_TOLERANCE (default ₹1) absorbs harmless UPI rounding
-without ever approving a materially different amount.
+BHARATPE_AMOUNT_TOLERANCE (default ₹0.01, i.e. exact match) is only
+there to absorb genuine float noise — it's intentionally too tight to
+let an underpayment (e.g. paying ₹1 for a ₹2 coupon) slip through as a
+"match".
 Storage: MongoDB (MONGO_URI / MONGO_DB_NAME) — works with a free
 MongoDB Atlas cluster, a self-hosted Mongo instance, or localhost for
 local dev. Codes are claimed one at a time with atomic per-document
