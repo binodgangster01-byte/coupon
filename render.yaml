@@ -28,6 +28,8 @@ services:
         value: "coupon_shop"
       - key: BHARATPE_TOKEN
         sync: false
+      - key: PREMIUM_EMOJI_IDS
+        value: "{}"
       - key: SHOP_NAME
         value: "My Coupon Shop"
       - key: QR_VALID_MINUTES
