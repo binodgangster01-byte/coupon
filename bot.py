@@ -52,6 +52,7 @@ Admin commands (send these directly to the bot in your own DM)
 
 import os
 import io
+import json
 import logging
 import threading
 import requests
@@ -60,6 +61,7 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     ReplyKeyboardMarkup,
 )
 from telegram.constants import ParseMode
@@ -108,6 +110,31 @@ BHARATPE_AMOUNT_TOLERANCE = float(os.environ.get("BHARATPE_AMOUNT_TOLERANCE", "0
 # hand it to an admin.
 MAX_UTR_ATTEMPTS = int(os.environ.get("MAX_UTR_ATTEMPTS", "3"))
 
+# --------------------------------------------------------- colorful buttons
+# Bot API 9.4+ lets buttons carry a "style" (primary/success/danger color)
+# and an optional custom-emoji icon. Styles work for every bot with no
+# setup. Custom-emoji icons are a Telegram Premium perk: they only render
+# if the Telegram account that owns this bot (the one that talked to
+# @BotFather) has an active Premium subscription — otherwise Telegram
+# just ignores icon_custom_emoji_id and shows the button with no icon, so
+# it's safe to leave configured either way.
+#
+# To use your own premium emoji as button icons: send the custom emoji to
+# @userinfobot (or forward a message containing it) to see its numeric id,
+# then set PREMIUM_EMOJI_IDS as JSON, e.g.:
+#   PREMIUM_EMOJI_IDS={"buy": "5368324170671202286", "orders": "5368..."}
+try:
+    PREMIUM_EMOJI_IDS = json.loads(os.environ.get("PREMIUM_EMOJI_IDS", "{}"))
+except Exception:
+    log.warning("PREMIUM_EMOJI_IDS is not valid JSON — ignoring it, no icons will be shown.")
+    PREMIUM_EMOJI_IDS = {}
+
+
+def emoji_icon(key: str):
+    """Custom-emoji id for a named button icon, or None if not configured
+    (buttons just show their plain-text emoji prefix as before)."""
+    return PREMIUM_EMOJI_IDS.get(key) or None
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -142,7 +169,16 @@ def start_health_server():
     server.serve_forever()
 
 MAIN_MENU = ReplyKeyboardMarkup(
-    [["🛍 Buy Vouchers", "📦 My Orders"], ["🔑 Recover Vouchers", "🆘 Support"]],
+    [
+        [
+            KeyboardButton("🛍 Buy Vouchers", style="success", icon_custom_emoji_id=emoji_icon("buy")),
+            KeyboardButton("📦 My Orders", style="primary", icon_custom_emoji_id=emoji_icon("orders")),
+        ],
+        [
+            KeyboardButton("🔑 Recover Vouchers", style="primary", icon_custom_emoji_id=emoji_icon("recover")),
+            KeyboardButton("🆘 Support", style="primary", icon_custom_emoji_id=emoji_icon("support")),
+        ],
+    ],
     resize_keyboard=True,
 )
 
@@ -245,20 +281,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ------------------------------------------------------------- Buy Vouchers
+def product_buttons(products) -> list:
+    """Builds the product picker keyboard, colored green for in-stock items
+    and red for sold-out ones so buyers see availability at a glance."""
+    buttons = []
+    for p in products:
+        stock = db.stock_count(p["id"])
+        label = f"{p['name']} — ₹{p['price']:.2f} (Stock: {stock})"
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    label,
+                    callback_data=f"prod:{p['id']}",
+                    style="success" if stock > 0 else "danger",
+                    icon_custom_emoji_id=emoji_icon("product"),
+                )
+            ]
+        )
+    return buttons
+
+
 async def buy_vouchers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     products = db.list_products()
     if not products:
         await update.message.reply_text("No products available right now — check back soon!")
         return
-    buttons = []
-    for p in products:
-        stock = db.stock_count(p["id"])
-        label = f"{p['name']} — ₹{p['price']:.2f} (Stock: {stock})"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"prod:{p['id']}")])
     await update.message.reply_text(
         "🛍 *Choose a product:*",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(buttons),
+        reply_markup=InlineKeyboardMarkup(product_buttons(products)),
     )
 
 
@@ -287,14 +338,21 @@ async def product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for qty in QTY_PRESETS:
         if qty <= stock:
             total = product["price"] * qty
-            row.append(InlineKeyboardButton(f"{qty} code{'s' if qty > 1 else ''} — ₹{total:.2f}", callback_data=f"qty:{product_id}:{qty}"))
+            row.append(
+                InlineKeyboardButton(
+                    f"{qty} code{'s' if qty > 1 else ''} — ₹{total:.2f}",
+                    callback_data=f"qty:{product_id}:{qty}",
+                    style="success",
+                    icon_custom_emoji_id=emoji_icon("qty"),
+                )
+            )
             if len(row) == 2:
                 buttons.append(row)
                 row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton("Other amount", callback_data=f"qtyother:{product_id}")])
-    buttons.append([InlineKeyboardButton("⭐ Back", callback_data="backtoproducts")])
+    buttons.append([InlineKeyboardButton("Other amount", callback_data=f"qtyother:{product_id}", style="primary")])
+    buttons.append([InlineKeyboardButton("⭐ Back", callback_data="backtoproducts", style="danger")])
 
     await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -303,12 +361,11 @@ async def back_to_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     products = db.list_products()
-    buttons = []
-    for p in products:
-        stock = db.stock_count(p["id"])
-        label = f"{p['name']} — ₹{p['price']:.2f} (Stock: {stock})"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"prod:{p['id']}")])
-    await query.edit_message_text("🛍 *Choose a product:*", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(buttons))
+    await query.edit_message_text(
+        "🛍 *Choose a product:*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(product_buttons(products)),
+    )
 
 
 async def qty_custom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -361,8 +418,11 @@ async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE, product
     )
     buttons = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🔥 I Agree — Proceed to Payment", callback_data=f"agree:{product_id}:{qty}")],
-            [InlineKeyboardButton("🔮 Cancel", callback_data="backtoproducts")],
+            [InlineKeyboardButton(
+                "🔥 I Agree — Proceed to Payment", callback_data=f"agree:{product_id}:{qty}",
+                style="success", icon_custom_emoji_id=emoji_icon("agree"),
+            )],
+            [InlineKeyboardButton("🔮 Cancel", callback_data="backtoproducts", style="danger")],
         ]
     )
     if via_message:
@@ -412,8 +472,8 @@ async def send_to_admin_for_manual_review(context: ContextTypes.DEFAULT_TYPE, or
     admin_buttons = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("✅ Approve", callback_data=f"approve:{order['order_id']}"),
-                InlineKeyboardButton("❌ Reject", callback_data=f"reject:{order['order_id']}"),
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve:{order['order_id']}", style="success"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reject:{order['order_id']}", style="danger"),
             ]
         ]
     )
@@ -462,7 +522,7 @@ async def agree_and_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Tap 🔥 I've Paid after payment, then send your UTR/Transaction ID to get verified instantly."
     )
     buttons = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🔥 I've Paid", callback_data=f"paid:{order_id}")]]
+        [[InlineKeyboardButton("🔥 I've Paid", callback_data=f"paid:{order_id}", style="success", icon_custom_emoji_id=emoji_icon("paid"))]]
     )
     await query.delete_message()
     await context.bot.send_photo(
@@ -726,10 +786,10 @@ async def support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You have no orders yet — nothing to get support on.")
         return ConversationHandler.END
     buttons = [
-        [InlineKeyboardButton(f"{o['order_id']} — {o['product_name']}", callback_data=f"sup:{o['order_id']}")]
+        [InlineKeyboardButton(f"{o['order_id']} — {o['product_name']}", callback_data=f"sup:{o['order_id']}", style="primary")]
         for o in orders
     ]
-    buttons.append([InlineKeyboardButton("Cancel", callback_data="sup:cancel")])
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="sup:cancel", style="danger")])
     await update.message.reply_text(
         "🆘 *Support*\nSelect the order you need help with:",
         parse_mode=ParseMode.MARKDOWN,
