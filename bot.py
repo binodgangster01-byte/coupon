@@ -53,6 +53,7 @@ from telegram import (
     ReplyKeyboardMarkup,
 )
 from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -141,6 +142,17 @@ def order_prefix_for(user) -> str:
     return cleaned[:10] or "ORD"
 
 
+def md(text) -> str:
+    """
+    Escape any text that came from a user (usernames, free-form messages,
+    product names an admin typed, etc.) before it's embedded in a
+    Markdown-formatted message. Without this, a lone underscore or asterisk
+    in someone's Telegram username or a support message breaks Telegram's
+    Markdown parser and the whole message silently fails to send.
+    """
+    return escape_markdown(str(text), version=1)
+
+
 # ------------------------------------------------------------------ /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -181,11 +193,11 @@ async def product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     stock = db.stock_count(product_id)
     if stock <= 0:
-        await query.edit_message_text(f"😔 *{product['name']}* is out of stock right now.", parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(f"😔 *{md(product['name'])}* is out of stock right now.", parse_mode=ParseMode.MARKDOWN)
         return
 
     text = (
-        f"*{product['name']}*\n\n"
+        f"*{md(product['name'])}*\n\n"
         f"Available stock: *{stock}* codes\n"
         f"Price: ₹{product['price']:.2f} per code\n\n"
         "Select option:"
@@ -227,7 +239,7 @@ async def qty_custom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stock = db.stock_count(product_id)
     context.user_data["buy_product_id"] = product_id
     await query.edit_message_text(
-        f"How many codes of *{product['name']}* would you like? (max {stock})\nSend a number, or /cancel.",
+        f"How many codes of *{md(product['name'])}* would you like? (max {stock})\nSend a number, or /cancel.",
         parse_mode=ParseMode.MARKDOWN,
     )
     return BUY_WAIT_CUSTOM_QTY
@@ -258,12 +270,12 @@ async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE, product
     product = db.get_product(product_id)
     total = product["price"] * qty
     text = (
-        f"*{product['name']}*\n\n"
+        f"*{md(product['name'])}*\n\n"
         f"🍹 *Terms & Conditions*\n"
         "――――――――――――――――――\n"
         f"{TERMS_TEXT}\n"
         "――――――――――――――――――\n\n"
-        f"Service: *{product['name']}*\n"
+        f"Service: *{md(product['name'])}*\n"
         f"Qty: *{qty}*  |  Amount: *₹{total:.2f}*\n\n"
         "Tap *I Agree* to confirm you have read and accepted the above terms."
     )
@@ -313,7 +325,7 @@ async def agree_and_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = (
         "💳 *Payment Details*\n\n"
         f"💎 Order ID: `{order_id}`\n"
-        f"👑 Service: *{product['name']}*\n"
+        f"👑 Service: *{md(product['name'])}*\n"
         f"🗿 Qty: *{qty}*\n"
         f"👀 Amount: *₹{total:.2f}*\n\n"
         "💳 Scan the QR with any UPI app (GPay / PhonePe / BharatPe)\n"
@@ -372,10 +384,10 @@ async def buyer_confirmed_payment(update: Update, context: ContextTypes.DEFAULT_
         admin_text = (
             "💰 *Payment claim*\n"
             f"Order: `{order['order_id']}`\n"
-            f"Item: {order['product_name']}\n"
+            f"Item: {md(order['product_name'])}\n"
             f"Qty: {order['quantity']}\n"
             f"Amount: ₹{order['price']:.2f}\n"
-            f"Buyer: {order['username']} (id `{order['user_id']}`)\n\n"
+            f"Buyer: {md(order['username'])} (id `{order['user_id']}`)\n\n"
             "Verify the payment in your bank/UPI app, then tap Approve or Reject."
         )
         admin_buttons = InlineKeyboardMarkup(
@@ -420,7 +432,7 @@ async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
             order["user_id"],
             f"🎉 *Payment confirmed!*\n"
             f"Order: `{order_id}`\n"
-            f"Item: {order['product_name']}\n"
+            f"Item: {md(order['product_name'])}\n"
             f"Qty: {order['quantity']}\n\n"
             f"🔑 Your code(s):\n{codes_block}",
             parse_mode=ParseMode.MARKDOWN,
@@ -445,7 +457,7 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = ["📦 *Your Orders*\n"]
     for o in orders:
         lines.append(
-            f"💎 `{o['order_id']}`\n{o['product_name']} | Qty {o['quantity']}\n"
+            f"💎 `{o['order_id']}`\n{md(o['product_name'])} | Qty {o['quantity']}\n"
             f"₹{o['price']:.2f} | *{o['status'].capitalize()}*\n"
         )
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
@@ -516,8 +528,8 @@ async def support_relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ADMIN_CHAT_ID:
         await context.bot.send_message(
             ADMIN_CHAT_ID,
-            f"🆘 *Support message*\nOrder: `{order_id}`\nFrom: {user.username or user.full_name} (id `{user.id}`)\n\n"
-            f"{update.message.text}",
+            f"🆘 *Support message*\nOrder: `{order_id}`\nFrom: {md(user.username or user.full_name)} (id `{user.id}`)\n\n"
+            f"{md(update.message.text)}",
             parse_mode=ParseMode.MARKDOWN,
         )
     await update.message.reply_text("Sent to our team — we'll reply here soon.", reply_markup=MAIN_MENU)
@@ -539,7 +551,7 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /reply <user_id> <message>")
         return
     _, uid, msg = parts
-    await context.bot.send_message(int(uid), f"💬 *Support reply:*\n{msg}", parse_mode=ParseMode.MARKDOWN)
+    await context.bot.send_message(int(uid), f"💬 *Support reply:*\n{md(msg)}", parse_mode=ParseMode.MARKDOWN)
     await update.message.reply_text("Sent.")
 
 
@@ -595,7 +607,7 @@ async def admin_addcodes_start(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     context.user_data["addcodes_pid"] = pid
     await update.message.reply_text(
-        f"Send the voucher codes for *{product['name']}* now, one per line. /cancel to stop.",
+        f"Send the voucher codes for *{md(product['name'])}* now, one per line. /cancel to stop.",
         parse_mode=ParseMode.MARKDOWN,
     )
     return ADMIN_WAIT_CODES
@@ -607,6 +619,16 @@ async def admin_addcodes_receive(update: Update, context: ContextTypes.DEFAULT_T
     n = db.add_codes(pid, codes)
     await update.message.reply_text(f"✅ Added {n} codes. New stock: {db.stock_count(pid)}")
     return ConversationHandler.END
+
+
+# ----------------------------------------------------------------- error log
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Catches any exception raised inside a handler (e.g. a Telegram API
+    rejection like a bad Markdown message) and logs it clearly, so failures
+    show up in Render's Logs tab instead of silently vanishing.
+    """
+    log.error("Unhandled exception while processing an update", exc_info=context.error)
 
 
 # ----------------------------------------------------------------------- main
@@ -660,6 +682,7 @@ def main():
     app.add_handler(CommandHandler("products", admin_list_products))
     app.add_handler(CommandHandler("deactivate", admin_deactivate))
     app.add_handler(CommandHandler("reply", admin_reply))
+    app.add_error_handler(on_error)
 
     # Only needed when deployed as a Render (or similar) free "Web Service".
     # Harmless locally — it just opens an extra port nobody hits.
