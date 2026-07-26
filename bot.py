@@ -223,7 +223,7 @@ async def notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_mar
 
 
 def order_prefix_for(user) -> str:
-    """Order IDs are prefixed with the buyer's name, e.g. SUMIT-20260725-0E629B."""
+    """Order IDs are prefixed with the buyer's name, e.g. AᴠꞮɴᴀSʜ-20260725-0E629B."""
     raw = (user.first_name or user.username or "ORD").upper()
     cleaned = "".join(ch for ch in raw if ch.isalnum())
     return cleaned[:10] or "ORD"
@@ -755,7 +755,7 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------------------------------------------------ Recover Vouchers
 async def recover_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🔑 *Recover Vouchers*\nSend your Order ID.\nExample: `SUMIT-20260725-0E629B`\n\nSend /cancel to stop.",
+        "🔑 *Recover Vouchers*\nSend your Order ID.\nExample: `AᴠꞮɴᴀSʜ-20260725-0E629B`\n\nSend /cancel to stop.",
         parse_mode=ParseMode.MARKDOWN,
     )
     return RECOVER_WAIT_ID
