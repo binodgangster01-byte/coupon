@@ -1,0 +1,32 @@
+# Render Blueprint — deploy this repo in one click via
+# https://render.com/docs/blueprint-spec (New -> Blueprint -> point at your repo).
+#
+# Storage now lives in MongoDB (e.g. a free MongoDB Atlas cluster), not on
+# Render's disk at all — so unlike the old SQLite setup, your orders and
+# stock now survive free-plan restarts/redeploys/sleep cycles just fine.
+# Set MONGO_URI below to your Atlas connection string.
+services:
+  - type: web
+    name: coupon-shop-bot
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
+    healthCheckPath: /
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: ADMIN_USER_IDS
+        sync: false
+      - key: UPI_ID
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        value: "coupon_shop"
+      - key: SHOP_NAME
+        value: "My Coupon Shop"
+      - key: QR_VALID_MINUTES
+        value: "10"
